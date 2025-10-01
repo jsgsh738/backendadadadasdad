@@ -7,19 +7,48 @@ import cors from "cors";
 const { Pool } = pkg;
 const app = express();
 
-// 🔑 подключение к PostgreSQL
 const pool = new Pool({
-  connectionString: process.env.postgresql://neondb_owner:npg_Vfh1dSrExi2a@ep-silent-mountain-aduh9z3d-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require, // Render или Neon
+  connectionString: process.env.postgresql://neondb_owner:npg_Vfh1dSrExi2a@ep-silent-mountain-aduh9z3d-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require, // твоя строка из Neon
   ssl: { rejectUnauthorized: false }
 });
 
-// 🔑 секрет для JWT токенов
 const JWT_SECRET = process.env.JWT_SECRET || "kernel_super_secret_2025";
 
 app.use(cors());
 app.use(express.json());
 
-// --- middleware для проверки токена ---
+// 🔹 Автосоздание таблиц
+async function initDb() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      display_name TEXT,
+      password_hash TEXT NOT NULL,
+      role TEXT DEFAULT 'user'
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      price INTEGER NOT NULL,
+      discount INTEGER DEFAULT 0,
+      pinned BOOLEAN DEFAULT false,
+      type TEXT CHECK (type IN ('download', 'buy')) NOT NULL,
+      file_url TEXT,
+      funpay_url TEXT,
+      star_url TEXT,
+      created_at TIMESTAMP DEFAULT now()
+    );
+  `);
+  console.log("✅ Таблицы проверены/созданы");
+}
+initDb();
+
+// --- Middleware проверки токена ---
 function auth(role = null) {
   return (req, res, next) => {
     const header = req.headers.authorization;
@@ -35,7 +64,7 @@ function auth(role = null) {
   };
 }
 
-// --- регистрация ---
+// --- Регистрация ---
 app.post("/api/register", async (req, res) => {
   const { email, password, displayName } = req.body;
   const hash = await bcrypt.hash(password, 10);
@@ -50,7 +79,7 @@ app.post("/api/register", async (req, res) => {
   }
 });
 
-// --- логин ---
+// --- Логин ---
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
   const result = await pool.query("SELECT * FROM users WHERE email=$1", [email]);
@@ -64,13 +93,13 @@ app.post("/api/login", async (req, res) => {
   res.json({ token, user: { id: user.id, email: user.email, role: user.role, displayName: user.display_name } });
 });
 
-// --- список товаров ---
+// --- Список товаров ---
 app.get("/api/products", async (req, res) => {
   const result = await pool.query("SELECT * FROM products ORDER BY pinned DESC, created_at DESC");
   res.json(result.rows);
 });
 
-// --- добавить товар (только админ) ---
+// --- Добавить товар ---
 app.post("/api/products", auth("admin"), async (req, res) => {
   const { title, description, price, discount, pinned, type, fileUrl, funpayUrl, starUrl } = req.body;
   const result = await pool.query(
@@ -81,7 +110,7 @@ app.post("/api/products", auth("admin"), async (req, res) => {
   res.json(result.rows[0]);
 });
 
-// --- редактировать товар ---
+// --- Редактировать товар ---
 app.put("/api/products/:id", auth("admin"), async (req, res) => {
   const { title, description, price, discount, pinned, type, fileUrl, funpayUrl, starUrl } = req.body;
   const result = await pool.query(
@@ -92,13 +121,13 @@ app.put("/api/products/:id", auth("admin"), async (req, res) => {
   res.json(result.rows[0]);
 });
 
-// --- удалить товар ---
+// --- Удалить товар ---
 app.delete("/api/products/:id", auth("admin"), async (req, res) => {
   await pool.query("DELETE FROM products WHERE id=$1", [req.params.id]);
   res.json({ success: true });
 });
 
-// --- сделать пользователя админом ---
+// --- Сделать админом ---
 app.post("/api/make-admin", auth("admin"), async (req, res) => {
   const { email } = req.body;
   const result = await pool.query("UPDATE users SET role='admin' WHERE email=$1 RETURNING id,email,role", [email]);
@@ -106,4 +135,4 @@ app.post("/api/make-admin", auth("admin"), async (req, res) => {
   res.json(result.rows[0]);
 });
 
-app.listen(3000, () => console.log("✅ API running on http://localhost:3000"));
+app.listen(3000, () => console.log("🚀 API запущено на http://localhost:3000"));
