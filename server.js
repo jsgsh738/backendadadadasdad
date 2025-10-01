@@ -8,7 +8,7 @@ const { Pool } = pkg;
 const app = express();
 
 const pool = new Pool({
-  connectionString: process.env.postgresql://neondb_owner:npg_Vfh1dSrExi2a@ep-silent-mountain-aduh9z3d-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require, // твоя строка из Neon
+  connectionString: process.env.postgres://neondb_owner:npg_Vfh1dSrExi2a@ep-silent-mountain-aduh9z3d-pooler.c-2.us-east-1.aws.neon.tech/neondb, // твоя строка из Neon
   ssl: { rejectUnauthorized: false }
 });
 
