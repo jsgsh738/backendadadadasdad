@@ -7,7 +7,7 @@ import cors from "cors";
 const { Pool } = pkg;
 const app = express();
 
-// 🔑 Подключение к базе (твоя строка Neon)
+// 🔑 Подключение к базе Neon
 const pool = new Pool({
   connectionString: "postgres://neondb_owner:npg_Vfh1dSrExi2a@ep-silent-mountain-aduh9z3d-pooler.c-2.us-east-1.aws.neon.tech/neondb",
   ssl: { rejectUnauthorized: false }
@@ -91,8 +91,16 @@ app.post("/api/login", async (req, res) => {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: "Неверный пароль" });
 
+  // Сессия живёт 7 дней
   const token = jwt.sign({ id: user.id, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
+
   res.json({ token, user: { id: user.id, email: user.email, role: user.role, displayName: user.display_name } });
+});
+
+/* 📌 Logout (чисто для фронта) */
+app.post("/api/logout", (req, res) => {
+  // На сервере мы не храним сессии, просто отвечаем успехом
+  res.json({ success: true, message: "Вы вышли из аккаунта. Удалите токен на клиенте." });
 });
 
 /* 📌 Получение товаров */
