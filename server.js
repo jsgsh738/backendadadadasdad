@@ -137,6 +137,17 @@ app.post("/api/make-admin", auth("admin"), async (req, res) => {
   res.json(result.rows[0]);
 });
 
+/* 📌 Смена пароля */
+app.post("/api/change-password", auth(), async (req, res) => {
+  const { password } = req.body;
+  if (!password) return res.status(400).json({ error: "Пароль обязателен" });
+
+  const hash = await bcrypt.hash(password, 10);
+  await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [hash, req.user.id]);
+
+  res.json({ success: true, message: "Пароль успешно изменён" });
+});
+
 /* 📌 Проверка backend */
 app.get("/", (req, res) => {
   res.send("✅ Kernel backend работает");
