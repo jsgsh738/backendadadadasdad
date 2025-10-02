@@ -26,9 +26,13 @@ async function initDb() {
       email TEXT UNIQUE NOT NULL,
       display_name TEXT,
       password_hash TEXT NOT NULL,
-      role TEXT DEFAULT 'user'
+      role TEXT DEFAULT 'user',
+      token_version INTEGER DEFAULT 0
     );
   `);
+
+  // На случай если таблица была создана раньше без token_version
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER DEFAULT 0;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
@@ -52,15 +56,30 @@ initDb();
 
 /* 📌 Middleware */
 function auth(role = null) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const header = req.headers.authorization;
     if (!header) return res.status(401).json({ error: "Нет токена" });
     try {
-      const decoded = jwt.verify(header.split(" ")[1], JWT_SECRET);
-      if (role && decoded.role !== role) return res.status(403).json({ error: "Нет доступа" });
-      req.user = decoded;
+      const token = header.split(" ")[1];
+      const decoded = jwt.verify(token, JWT_SECRET);
+
+      // сверяем версию токена с БД
+      const result = await pool.query("SELECT token_version, role FROM users WHERE id=$1", [decoded.id]);
+      if (result.rows.length === 0) return res.status(401).json({ error: "Пользователь не найден" });
+
+      const dbVersion = Number(result.rows[0].token_version || 0);
+      const dbRole = result.rows[0].role;
+
+      if ((decoded.tokenVersion || 0) !== dbVersion) {
+        return res.status(401).json({ error: "Сессия устарела. Войдите заново." });
+      }
+
+      if (role && dbRole !== role) return res.status(403).json({ error: "Нет доступа" });
+
+      req.user = { id: decoded.id, email: decoded.email, role: dbRole };
       next();
-    } catch {
+    } catch (err) {
+      console.error("auth error:", err);
       res.status(401).json({ error: "Неверный токен" });
     }
   };
@@ -72,7 +91,7 @@ app.post("/api/register", async (req, res) => {
   const hash = await bcrypt.hash(password, 10);
   try {
     const result = await pool.query(
-      "INSERT INTO users (email, display_name, password_hash, role) VALUES ($1,$2,$3,$4) RETURNING id,email,role,display_name",
+      "INSERT INTO users (email, display_name, password_hash, role, token_version) VALUES ($1,$2,$3,$4,0) RETURNING id,email,role,display_name,token_version",
       [email, displayName, hash, email === "egorgudyma063@gmail.com" ? "admin" : "user"]
     );
     res.json(result.rows[0]);
@@ -91,30 +110,28 @@ app.post("/api/login", async (req, res) => {
   const ok = await bcrypt.compare(password, user.password_hash);
   if (!ok) return res.status(401).json({ error: "Неверный пароль" });
 
-  // Сессия живёт 7 дней
-  const token = jwt.sign({ id: user.id, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: "7d" });
+  const token = jwt.sign(
+    { id: user.id, role: user.role, email: user.email, tokenVersion: user.token_version },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
 
   res.json({ token, user: { id: user.id, email: user.email, role: user.role, displayName: user.display_name } });
 });
 
-/* 📌 Logout (чисто для фронта) */
+/* 📌 Logout */
 app.post("/api/logout", (req, res) => {
   res.json({ success: true, message: "Вы вышли из аккаунта. Удалите токен на клиенте." });
 });
 
 /* 📌 Текущий пользователь */
 app.get("/api/me", auth(), async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT id,email,display_name,role FROM users WHERE id=$1",
-      [req.user.id]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ error: "Пользователь не найден" });
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Ошибка сервера" });
-  }
+  const result = await pool.query(
+    "SELECT id,email,display_name,role FROM users WHERE id=$1",
+    [req.user.id]
+  );
+  if (result.rows.length === 0) return res.status(404).json({ error: "Пользователь не найден" });
+  res.json(result.rows[0]);
 });
 
 /* 📌 Получение товаров */
@@ -159,15 +176,15 @@ app.post("/api/make-admin", auth("admin"), async (req, res) => {
   res.json(result.rows[0]);
 });
 
-/* 📌 Смена пароля */
+/* 📌 Смена пароля — увеличиваем token_version */
 app.post("/api/change-password", auth(), async (req, res) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error: "Пароль обязателен" });
 
   const hash = await bcrypt.hash(password, 10);
-  await pool.query("UPDATE users SET password_hash=$1 WHERE id=$2", [hash, req.user.id]);
+  await pool.query("UPDATE users SET password_hash=$1, token_version = token_version + 1 WHERE id=$2", [hash, req.user.id]);
 
-  res.json({ success: true, message: "Пароль успешно изменён" });
+  res.json({ success: true, message: "Пароль успешно изменён. Все сессии сброшены." });
 });
 
 /* 📌 Проверка backend */
