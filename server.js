@@ -99,8 +99,22 @@ app.post("/api/login", async (req, res) => {
 
 /* 📌 Logout (чисто для фронта) */
 app.post("/api/logout", (req, res) => {
-  // На сервере мы не храним сессии, просто отвечаем успехом
   res.json({ success: true, message: "Вы вышли из аккаунта. Удалите токен на клиенте." });
+});
+
+/* 📌 Текущий пользователь */
+app.get("/api/me", auth(), async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT id,email,display_name,role FROM users WHERE id=$1",
+      [req.user.id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: "Пользователь не найден" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Ошибка сервера" });
+  }
 });
 
 /* 📌 Получение товаров */
